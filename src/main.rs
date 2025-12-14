@@ -56,6 +56,7 @@ fn decode_instructions(bytes: &[u8]) {
             panic!("Unknown instruction");
         }
         let w_bit = ((byte1 & W_BIT_MASK) >> W_BIT_SHIFT) as usize;
+        let d_bit: bool = matches!((byte1 & D_BIT_MASK) >> D_BIT_SHIFT, 1);
 
         if index >= bytes.len() {
             panic!("Not enough bytes to decode instructions");
@@ -71,6 +72,11 @@ fn decode_instructions(bytes: &[u8]) {
         let rm = (byte2 & RM_MASK) as usize;
         let arg1: &str = REGISTER_MAP[reg][w_bit];
         let arg2: &str = REGISTER_MAP[rm][w_bit];
-        println!("{} {}, {}", inst, arg1, arg2);
+
+        if d_bit {
+            println!("{} {}, {}", inst, arg1, arg2);
+        } else {
+            println!("{} {}, {}", inst, arg2, arg1);
+        }
     }
 }
