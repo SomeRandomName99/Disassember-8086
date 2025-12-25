@@ -38,12 +38,19 @@ fn main() {
     };
 
     let instruction_stream = fs::read(file_path).expect("Could not read file");
-    decode_instructions(&instruction_stream);
+
+    let mut dst = String::with_capacity(32);
+    let mut src = String::with_capacity(32);
+    decode_instructions(&instruction_stream, &mut dst, &mut src);
 }
 
-fn decode_instructions(mut bytes: &[u8]) {
+fn decode_instructions(mut bytes: &[u8], dst: &mut String, src: &mut String) {
     // The while loop is needed because different instructions have different lengths
     while !bytes.is_empty() {
+        // Clear the arena like strings
+        dst.clear();
+        src.clear();
+
         let byte1 = bytes[0];
         bytes = &bytes[1..];
 
@@ -62,21 +69,23 @@ fn decode_instructions(mut bytes: &[u8]) {
         let byte2 = bytes[0];
         bytes = &bytes[1..];
         let mod_bytes = byte2 >> MOD_SHIFT;
-        if mod_bytes != 0b11 {
-            panic!("Cannot decode this mov instruction yet");
+
+        let r_m = (byte2 & RM_MASK) as usize;
+        if mod_bytes == 0b11 {
+            let reg = ((byte2 & REG_MASK) >> REG_SHIFT) as usize;
+
+            let reg_arg: &str = REGISTER_MAP[reg][w_bit];
+            let rm_arg: &str = REGISTER_MAP[r_m][w_bit];
+
+            if d_bit {
+                dst.push_str(reg_arg);
+                src.push_str(rm_arg);
+            } else {
+                src.push_str(reg_arg);
+                dst.push_str(rm_arg);
+            }
         }
-        let reg = ((byte2 & REG_MASK) >> REG_SHIFT) as usize;
-        let rm = (byte2 & RM_MASK) as usize;
 
-        let reg_arg: &str = REGISTER_MAP[reg][w_bit];
-        let rm_arg: &str = REGISTER_MAP[rm][w_bit];
-
-        let (dest, src) = if d_bit {
-            (reg_arg, rm_arg)
-        } else {
-            (rm_arg, reg_arg)
-        };
-
-        println!("{} {}, {}", inst, dest, src);
+        println!("{} {}, {}", inst, dst, src);
     }
 }
