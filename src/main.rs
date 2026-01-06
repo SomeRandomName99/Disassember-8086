@@ -90,14 +90,14 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
                 "Direct address mode is not yet supported"
             );
             let reg = match r_m {
-                0b000 => "BX + SI",
-                0b001 => "BX + DI",
-                0b010 => "BP + SI",
-                0b011 => "BP + DI",
-                0b100 => "SI",
-                0b101 => "DI",
-                0b110 => "BP",
-                0b111 => "BX",
+                0b000 => "bx + si",
+                0b001 => "bx + di",
+                0b010 => "bp + si",
+                0b011 => "bp + di",
+                0b100 => "si",
+                0b101 => "di",
+                0b110 => "bp",
+                0b111 => "bx",
                 _ => panic!("Invalid R/M"),
             };
             let mut displacement: i16 = 0;
