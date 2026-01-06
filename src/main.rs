@@ -1,4 +1,5 @@
 use std::env;
+use std::fmt::Write;
 use std::fs;
 
 const OPCODE_SHIFT: u8 = 2;
@@ -39,17 +40,17 @@ fn main() {
 
     let instruction_stream = fs::read(file_path).expect("Could not read file");
 
-    let mut dst = String::with_capacity(32);
-    let mut src = String::with_capacity(32);
-    decode_instructions(&instruction_stream, &mut dst, &mut src);
+    let mut arg1 = String::with_capacity(128);
+    let mut arg2 = String::with_capacity(128);
+    decode_instructions(&instruction_stream, &mut arg1, &mut arg2);
 }
 
-fn decode_instructions(mut bytes: &[u8], dst: &mut String, src: &mut String) {
+fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
     // The while loop is needed because different instructions have different lengths
     while !bytes.is_empty() {
         // Clear the arena like strings
-        dst.clear();
-        src.clear();
+        arg1.clear();
+        arg2.clear();
 
         let byte1 = bytes[0];
         bytes = &bytes[1..];
@@ -70,22 +71,51 @@ fn decode_instructions(mut bytes: &[u8], dst: &mut String, src: &mut String) {
         bytes = &bytes[1..];
         let mod_bytes = byte2 >> MOD_SHIFT;
 
+        let reg = ((byte2 & REG_MASK) >> REG_SHIFT) as usize;
+        let reg_arg: &str = REGISTER_MAP[reg][w_bit];
         let r_m = (byte2 & RM_MASK) as usize;
-        if mod_bytes == 0b11 {
-            let reg = ((byte2 & REG_MASK) >> REG_SHIFT) as usize;
 
-            let reg_arg: &str = REGISTER_MAP[reg][w_bit];
+        let (dst, src) = match d_bit {
+            true => (&mut *arg1, &mut *arg2),
+            false => (&mut *arg2, &mut *arg1),
+        };
+        if mod_bytes == 0b11 {
             let rm_arg: &str = REGISTER_MAP[r_m][w_bit];
 
-            if d_bit {
-                dst.push_str(reg_arg);
-                src.push_str(rm_arg);
+            dst.push_str(reg_arg);
+            src.push_str(rm_arg);
+        } else {
+            assert!(
+                !(r_m == 0b110 && mod_bytes == 0),
+                "Direct address mode is not yet supported"
+            );
+            let reg = match r_m {
+                0b000 => "BX + SI",
+                0b001 => "BX + DI",
+                0b010 => "BP + SI",
+                0b011 => "BP + DI",
+                0b100 => "SI",
+                0b101 => "DI",
+                0b110 => "BP",
+                0b111 => "BX",
+                _ => panic!("Invalid R/M"),
+            };
+            let mut displacement: u16 = 0;
+            if mod_bytes == 0b01 {
+                displacement |= bytes[0] as u16;
+                bytes = &bytes[1..];
+            } else if mod_bytes == 0b10 {
+                displacement |= (bytes[0] as u16) | ((bytes[1] as u16) << 8);
+                bytes = &bytes[2..];
+            }
+            write!(dst, "{}", reg_arg).unwrap();
+            if mod_bytes != 0 {
+                write!(src, "[{} + {}]", reg, displacement).unwrap();
             } else {
-                src.push_str(reg_arg);
-                dst.push_str(rm_arg);
+                write!(src, "[{}]", reg).unwrap();
             }
         }
 
-        println!("{} {}, {}", inst, dst, src);
+        println!("{} {}, {}", inst, arg1, arg2);
     }
 }
