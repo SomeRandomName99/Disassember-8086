@@ -100,12 +100,12 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
                 0b111 => "BX",
                 _ => panic!("Invalid R/M"),
             };
-            let mut displacement: u16 = 0;
+            let mut displacement: i16 = 0;
             if mod_bytes == 0b01 {
-                displacement |= bytes[0] as u16;
+                displacement |= (bytes[0] as i8) as i16;
                 bytes = &bytes[1..];
             } else if mod_bytes == 0b10 {
-                displacement |= (bytes[0] as u16) | ((bytes[1] as u16) << 8);
+                displacement = i16::from_le_bytes([bytes[0], bytes[1]]);
                 bytes = &bytes[2..];
             }
             write!(dst, "{}", reg_arg).unwrap();
