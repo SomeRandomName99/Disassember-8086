@@ -3,6 +3,8 @@ use std::fmt::Write;
 use std::fs;
 
 const W_BIT_MASK: u8 = 0b1;
+const S_BIT_SHIFT: u8 = 0b1;
+const S_BIT_MASK: u8 = 0b1;
 const REGISTER_MAP: [[&str; 2]; 8] = [
     ["al", "ax"],
     ["cl", "cx"],
@@ -13,6 +15,7 @@ const REGISTER_MAP: [[&str; 2]; 8] = [
     ["dh", "si"],
     ["bh", "di"],
 ];
+const INSTRUCTION_NAMES: [&str; 8] = ["add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"];
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -51,20 +54,19 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
         // Match 6 bit instructions
         let opcode = byte1 >> 2;
         match opcode {
+            0b100000 => {
+                decode_arithmetic_imm_regmem(&mut bytes, arg1, arg2);
+                continue 'decode;
+            }
             0b100010 => {
                 decode_regmem_reg("mov", &mut bytes, arg1, arg2);
                 continue 'decode;
             }
-            0b000000 => {
-                decode_regmem_reg("add", &mut bytes, arg1, arg2);
-                continue 'decode;
-            }
-            0b001010 => {
-                decode_regmem_reg("sub", &mut bytes, arg1, arg2);
-                continue 'decode;
-            }
-            0b001110 => {
-                decode_regmem_reg("cmp", &mut bytes, arg1, arg2);
+            0b000000 | 0b000010 | 0b000100 | 0b000110 | 0b001000 | 0b001010 | 0b001100
+            | 0b001110 => {
+                let inst_idx = (byte1 >> 3 & 0b111) as usize;
+                let inst_name = INSTRUCTION_NAMES[inst_idx];
+                decode_regmem_reg(inst_name, &mut bytes, arg1, arg2);
                 continue 'decode;
             }
             _ => {}
@@ -85,6 +87,13 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
                 decode_mov_imm_regmem(&mut bytes, arg1, arg2);
                 continue 'decode;
             }
+            0b0000010 | 0b0000110 | 0b0001010 | 0b0001110 | 0b0010010 | 0b0010110 | 0b0011010
+            | 0b0011110 => {
+                let inst_idx = (byte1 >> 3 & 0b0000111) as usize;
+                let inst_name = INSTRUCTION_NAMES[inst_idx];
+                decode_arithmetic_imm_acc(inst_name, &mut bytes);
+                continue 'decode;
+            }
             _ => panic!(
                 "Unsupported instruction. Opcode byte: {byte1:#b}, {:#b}",
                 bytes[0]
@@ -103,7 +112,7 @@ enum EffectiveAddress {
 fn decode_effective_address_calculation(
     bytes: &mut &[u8],
     w_bit: usize,
-) -> (&'static str, EffectiveAddress) {
+) -> (usize, EffectiveAddress) {
     const MOD_SHIFT: u8 = 6;
     const RM_MASK: u8 = 0b000000111;
     const REG_SHIFT: u8 = 3;
@@ -114,17 +123,16 @@ fn decode_effective_address_calculation(
     let mod_bytes = byte >> MOD_SHIFT;
     let r_m = (byte & RM_MASK) as usize;
     let reg = ((byte & REG_MASK) >> REG_SHIFT) as usize;
-    let reg_str: &str = REGISTER_MAP[reg][w_bit];
 
     if mod_bytes == 0b11 {
-        (reg_str, EffectiveAddress::Reg(REGISTER_MAP[r_m][w_bit]))
+        (reg, EffectiveAddress::Reg(REGISTER_MAP[r_m][w_bit]))
     } else {
         // Direct address mode
         if r_m == 0b110 && mod_bytes == 0 {
             let address: u16 = u16::from_le_bytes([bytes[0], bytes[1]]);
             *bytes = &bytes[2..];
 
-            (reg_str, EffectiveAddress::Direct(address))
+            (reg, EffectiveAddress::Direct(address))
         } else {
             let rm_reg_str = match r_m {
                 0b000 => "bx + si",
@@ -139,14 +147,14 @@ fn decode_effective_address_calculation(
             };
             let mut displacement: i16 = 0;
             if mod_bytes == 0b01 {
-                displacement = (bytes[0] as i8) as i16;
+                displacement = (bytes[0] as i8) as i16; // sign extend to 16 bits
                 *bytes = &bytes[1..];
             } else if mod_bytes == 0b10 {
                 displacement = i16::from_le_bytes([bytes[0], bytes[1]]);
                 *bytes = &bytes[2..];
             }
             (
-                reg_str,
+                reg,
                 EffectiveAddress::Indirect {
                     base: rm_reg_str,
                     disp: displacement,
@@ -189,7 +197,7 @@ fn decode_mov_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut String) 
         *bytes = &bytes[2..];
         write!(src, "word {immediate}").unwrap();
     } else {
-        let immediate = (bytes[0] as i8) as i16;
+        let immediate = (bytes[0] as i8) as i16; // sign extend to 16 bits
         *bytes = &bytes[1..];
         write!(src, "byte {immediate}").unwrap();
     }
@@ -212,8 +220,8 @@ fn decode_regmem_reg(instruction: &str, bytes: &mut &[u8], arg1: &mut String, ar
         false => (&mut *arg2, &mut *arg1),
     };
 
-    let (reg_str, eff_add) = decode_effective_address_calculation(bytes, w_bit);
-    dst.push_str(reg_str);
+    let (reg, eff_add) = decode_effective_address_calculation(bytes, w_bit);
+    dst.push_str(REGISTER_MAP[reg][w_bit]);
     write_effective_address(src, eff_add);
 
     println!("{instruction} {arg1}, {arg2}");
@@ -236,7 +244,7 @@ fn decode_mov_imm_reg(bytes: &mut &[u8]) {
         immediate = i16::from_le_bytes([bytes[0], bytes[1]]);
         *bytes = &bytes[2..];
     } else {
-        immediate |= (bytes[0] as i8) as i16;
+        immediate |= (bytes[0] as i8) as i16; // sign extend to 16 bits
         *bytes = &bytes[1..];
     }
 
@@ -252,4 +260,51 @@ fn decode_mov_mem_accu(bytes: &mut &[u8], accu_first: bool) {
     } else {
         println!("mov [{address}], ax");
     }
+}
+
+fn decode_arithmetic_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut String) {
+    let byte1 = bytes[0];
+    *bytes = &bytes[1..];
+
+    let w_bit = (byte1 & W_BIT_MASK) as usize;
+    let s_bit = (byte1 >> S_BIT_SHIFT) & S_BIT_MASK;
+
+    let (inst_idx, eff_add) = decode_effective_address_calculation(bytes, w_bit);
+
+    let inst_name = INSTRUCTION_NAMES[inst_idx];
+    write_effective_address(dst, eff_add);
+
+    if w_bit == 0 {
+        let immediate = bytes[0] as i8;
+        write!(src, "{immediate}").unwrap();
+        *bytes = &bytes[1..];
+    } else if s_bit == 0 && w_bit == 1 {
+        let immediate = i16::from_le_bytes([bytes[0], bytes[1]]);
+        write!(src, "{immediate}").unwrap();
+        *bytes = &bytes[2..];
+    } else {
+        let immediate = bytes[0] as i8 as i16; // sign extend to 16 bits
+        write!(src, "{immediate}").unwrap();
+        *bytes = &bytes[1..];
+    }
+
+    println!("{inst_name} {dst}, {src}");
+}
+
+fn decode_arithmetic_imm_acc(inst_name: &str, bytes: &mut &[u8]) {
+    let byte1 = bytes[0];
+    *bytes = &bytes[1..];
+
+    let w_bit = (byte1 & W_BIT_MASK) as usize;
+
+    let mut immediate: i16 = 0;
+    if w_bit == 1 {
+        immediate = i16::from_le_bytes([bytes[0], bytes[1]]);
+        *bytes = &bytes[2..];
+    } else {
+        immediate |= (bytes[0] as i8) as i16; // sign extend to 16 bits
+        *bytes = &bytes[1..];
+    }
+
+    println!("{inst_name} ax, {immediate}");
 }
