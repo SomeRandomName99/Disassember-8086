@@ -52,7 +52,19 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
         let opcode = byte1 >> 2;
         match opcode {
             0b100010 => {
-                decode_mov_regmem_reg(&mut bytes, arg1, arg2);
+                decode_regmem_reg("mov", &mut bytes, arg1, arg2);
+                continue 'decode;
+            }
+            0b000000 => {
+                decode_regmem_reg("add", &mut bytes, arg1, arg2);
+                continue 'decode;
+            }
+            0b001010 => {
+                decode_regmem_reg("sub", &mut bytes, arg1, arg2);
+                continue 'decode;
+            }
+            0b001110 => {
+                decode_regmem_reg("cmp", &mut bytes, arg1, arg2);
                 continue 'decode;
             }
             _ => {}
@@ -185,7 +197,7 @@ fn decode_mov_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut String) 
     println!("mov {dst} {src}");
 }
 
-fn decode_mov_regmem_reg(bytes: &mut &[u8], arg1: &mut String, arg2: &mut String) {
+fn decode_regmem_reg(instruction: &str, bytes: &mut &[u8], arg1: &mut String, arg2: &mut String) {
     const D_BIT_SHIFT: u8 = 1;
     const D_BIT_MASK: u8 = 0b00000010;
 
@@ -204,7 +216,7 @@ fn decode_mov_regmem_reg(bytes: &mut &[u8], arg1: &mut String, arg2: &mut String
     dst.push_str(reg_str);
     write_effective_address(src, eff_add);
 
-    println!("mov {}, {}", arg1, arg2);
+    println!("{instruction} {arg1}, {arg2}");
 }
 
 fn decode_mov_imm_reg(bytes: &mut &[u8]) {
