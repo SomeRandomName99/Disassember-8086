@@ -144,27 +144,33 @@ fn decode_effective_address_calculation(
     }
 }
 
+fn write_effective_address(buffer: &mut String, eff_add: EffectiveAddress) {
+    match eff_add {
+        EffectiveAddress::Reg(rm_reg_str) => {
+            buffer.push_str(rm_reg_str);
+        }
+        EffectiveAddress::Direct(address) => {
+            write!(buffer, "[{address}]").unwrap();
+        }
+        EffectiveAddress::Indirect { base, disp } => {
+            if disp > 0 {
+                write!(buffer, "[{} + {}]", base, disp).unwrap();
+            } else if disp < 0 {
+                write!(buffer, "[{} - {}]", base, disp.unsigned_abs()).unwrap();
+            } else {
+                write!(buffer, "[{}]", base).unwrap();
+            }
+        }
+    }
+}
+
 fn decode_mov_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut String) {
     let byte1 = bytes[0];
     *bytes = &bytes[1..];
     let w_bit = (byte1 & W_BIT_MASK) as usize;
 
     let (_, eff_add) = decode_effective_address_calculation(bytes, w_bit);
-    match eff_add {
-        EffectiveAddress::Reg(rm_reg_str) => {
-            dst.push_str(rm_reg_str);
-        }
-        EffectiveAddress::Direct(address) => {
-            write!(dst, "[{address}]").unwrap();
-        }
-        EffectiveAddress::Indirect { base, disp } => {
-            if disp != 0 {
-                write!(dst, "[{} + {}]", base, disp).unwrap();
-            } else {
-                write!(dst, "[{}]", base).unwrap();
-            }
-        }
-    }
+    write_effective_address(dst, eff_add);
 
     if w_bit == 1 {
         let immediate = i16::from_le_bytes([bytes[0], bytes[1]]);
@@ -196,21 +202,7 @@ fn decode_mov_regmem_reg(bytes: &mut &[u8], arg1: &mut String, arg2: &mut String
 
     let (reg_str, eff_add) = decode_effective_address_calculation(bytes, w_bit);
     dst.push_str(reg_str);
-    match eff_add {
-        EffectiveAddress::Reg(rm_reg_str) => {
-            src.push_str(rm_reg_str);
-        }
-        EffectiveAddress::Direct(address) => {
-            write!(src, "[{address}]").unwrap();
-        }
-        EffectiveAddress::Indirect { base, disp } => {
-            if disp != 0 {
-                write!(src, "[{} + {}]", base, disp).unwrap();
-            } else {
-                write!(src, "[{}]", base).unwrap();
-            }
-        }
-    }
+    write_effective_address(src, eff_add);
 
     println!("mov {}, {}", arg1, arg2);
 }
