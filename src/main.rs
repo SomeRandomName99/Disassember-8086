@@ -69,6 +69,10 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
                 decode_push_pop_reg("pop", &mut bytes);
                 continue 'decode;
             }
+            0b10010 => {
+                decode_xchg_acc(&mut bytes);
+                continue 'decode;
+            }
             _ => {}
         };
 
@@ -97,11 +101,11 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
         let opcode = byte1 >> 1;
         match opcode {
             0b1010000 => {
-                decode_mov_mem_accu(&mut bytes, true);
+                decode_mov_mem_acc(&mut bytes, true);
                 continue 'decode;
             }
             0b1010001 => {
-                decode_mov_mem_accu(&mut bytes, false);
+                decode_mov_mem_acc(&mut bytes, false);
                 continue 'decode;
             }
             0b1100011 => {
@@ -113,6 +117,10 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
                 let inst_idx = (byte1 >> 3 & 0b0000111) as usize;
                 let inst_name = INSTRUCTION_NAMES[inst_idx];
                 decode_arithmetic_imm_acc(inst_name, &mut bytes);
+                continue 'decode;
+            }
+            0b1000011 => {
+                decode_regmem_reg("xchg", &mut bytes, arg1, arg2);
                 continue 'decode;
             }
             _ => (),
@@ -302,11 +310,11 @@ fn decode_mov_imm_reg(bytes: &mut &[u8]) {
     println!("mov {}, {}", reg_str, immediate);
 }
 
-fn decode_mov_mem_accu(bytes: &mut &[u8], accu_first: bool) {
+fn decode_mov_mem_acc(bytes: &mut &[u8], acc_first: bool) {
     let address = u16::from_le_bytes([bytes[1], bytes[2]]);
     *bytes = &bytes[3..];
 
-    if accu_first {
+    if acc_first {
         println!("mov ax, [{address}]");
     } else {
         println!("mov [{address}], ax");
@@ -363,9 +371,9 @@ fn decode_arithmetic_imm_acc(inst_name: &str, bytes: &mut &[u8]) {
         immediate |= (bytes[0] as i8) as i16; // sign extend to 16 bits
         *bytes = &bytes[1..];
     }
-    let accu_name = if w_bit == 1 { "ax" } else { "al" };
+    let acc_name = if w_bit == 1 { "ax" } else { "al" };
 
-    println!("{inst_name} {accu_name}, {immediate}");
+    println!("{inst_name} {acc_name}, {immediate}");
 }
 
 fn decode_jmp_and_loops(bytes: &mut &[u8], is_jmp: bool) {
@@ -410,4 +418,12 @@ fn decode_push_pop_seg(inst_name: &str, bytes: &mut &[u8]) {
     let seg_idx = ((byte1 >> 3) & 0b11) as usize;
 
     println!("{inst_name} {}", SEGMENT_REGS[seg_idx]);
+}
+
+fn decode_xchg_acc(bytes: &mut &[u8]) {
+    let byte1 = bytes[0];
+    *bytes = &bytes[1..];
+
+    let reg_idx = (byte1 & 0b111) as usize;
+    println!("xchg ax, {}", REGISTER_MAP[reg_idx][1]);
 }
