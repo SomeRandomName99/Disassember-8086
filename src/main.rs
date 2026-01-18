@@ -29,6 +29,7 @@ fn main() {
 
     let mut arg1 = String::with_capacity(128);
     let mut arg2 = String::with_capacity(128);
+    println!("bits 16");
     decode_instructions(&instruction_stream, &mut arg1, &mut arg2);
 }
 
@@ -190,16 +191,23 @@ fn decode_mov_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut String) 
     let w_bit = (byte1 & W_BIT_MASK) as usize;
 
     let (_, eff_add) = decode_effective_address_calculation(bytes, w_bit);
+    if !matches!(eff_add, EffectiveAddress::Reg(_)) {
+        if w_bit == 1 {
+            dst.push_str("word ");
+        } else {
+            dst.push_str("byte ");
+        }
+    }
     write_effective_address(dst, eff_add);
 
     if w_bit == 1 {
         let immediate = i16::from_le_bytes([bytes[0], bytes[1]]);
         *bytes = &bytes[2..];
-        write!(src, "word {immediate}").unwrap();
+        write!(src, "{immediate}").unwrap();
     } else {
         let immediate = (bytes[0] as i8) as i16; // sign extend to 16 bits
         *bytes = &bytes[1..];
-        write!(src, "byte {immediate}").unwrap();
+        write!(src, "{immediate}").unwrap();
     }
 
     println!("mov {dst}, {src}");
@@ -272,6 +280,13 @@ fn decode_arithmetic_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut S
     let (inst_idx, eff_add) = decode_effective_address_calculation(bytes, w_bit);
 
     let inst_name = INSTRUCTION_NAMES[inst_idx];
+    if !matches!(eff_add, EffectiveAddress::Reg(_)) {
+        if w_bit == 1 {
+            dst.push_str("word ");
+        } else {
+            dst.push_str("byte ");
+        }
+    }
     write_effective_address(dst, eff_add);
 
     if w_bit == 0 {
@@ -305,6 +320,7 @@ fn decode_arithmetic_imm_acc(inst_name: &str, bytes: &mut &[u8]) {
         immediate |= (bytes[0] as i8) as i16; // sign extend to 16 bits
         *bytes = &bytes[1..];
     }
+    let accu_name = if w_bit == 1 { "ax" } else { "al" };
 
-    println!("{inst_name} ax, {immediate}");
+    println!("{inst_name} {accu_name}, {immediate}");
 }
