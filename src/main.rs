@@ -5,6 +5,8 @@ use std::fs;
 const W_BIT_MASK: u8 = 0b1;
 const S_BIT_SHIFT: u8 = 0b1;
 const S_BIT_MASK: u8 = 0b1;
+const REG_SHIFT: u8 = 3;
+const REG_MASK: u8 = 0b00111000;
 const REGISTER_MAP: [[&str; 2]; 8] = [
     ["al", "ax"],
     ["cl", "cx"],
@@ -15,13 +17,22 @@ const REGISTER_MAP: [[&str; 2]; 8] = [
     ["dh", "si"],
     ["bh", "di"],
 ];
-const INSTRUCTION_NAMES: [&str; 8] = ["add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"];
+const ALU_INST_NAMES: [&str; 8] = ["add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"];
 const CONDITIONAL_JMP_NAMES: [&str; 16] = [
     "jo", "jno", "jb", "jnb", "je", "jne", "jbe", "ja", "js", "jns", "jp", "jnp", "jl", "jge",
     "jle", "jg",
 ];
 const LOOP_NAMES: [&str; 4] = ["loopnz", "loopz", "loop", "jcxz"];
 const SEGMENT_REGS: [&str; 4] = ["es", "cs", "ss", "ds"];
+const GRP1: [&str; 8] = ["test", "???", "not", "neg", "mul", "imul", "div", "idiv"];
+const GRP2: [&str; 8] = ["inc", "dec", "call", "call", "jmp", "jmp", "push", "???"];
+
+/* TODO:
+* [x] Handle grp1
+* [] Handle inc and dec push
+* [] Handle not
+* [] Handle pop which is now left alone
+*/
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -62,11 +73,19 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
         let opcode = byte1 >> 3;
         match opcode {
             0b01010 => {
-                decode_push_pop_reg("push", &mut bytes);
+                decode_one_byte_reg("push", &mut bytes);
                 continue 'decode;
             }
             0b01011 => {
-                decode_push_pop_reg("pop", &mut bytes);
+                decode_one_byte_reg("pop", &mut bytes);
+                continue 'decode;
+            }
+            0b01000 => {
+                decode_one_byte_reg("inc", &mut bytes);
+                continue 'decode;
+            }
+            0b01001 => {
+                decode_one_byte_reg("dec", &mut bytes);
                 continue 'decode;
             }
             0b10010 => {
@@ -80,7 +99,7 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
         let opcode = byte1 >> 2;
         match opcode {
             0b100000 => {
-                decode_arithmetic_imm_regmem(&mut bytes, arg1, arg2);
+                decode_alu_imm_regmem(&mut bytes, arg1, arg2);
                 continue 'decode;
             }
             0b100010 => {
@@ -90,7 +109,7 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
             0b000000 | 0b000010 | 0b000100 | 0b000110 | 0b001000 | 0b001010 | 0b001100
             | 0b001110 => {
                 let inst_idx = (byte1 >> 3 & 0b111) as usize;
-                let inst_name = INSTRUCTION_NAMES[inst_idx];
+                let inst_name = ALU_INST_NAMES[inst_idx];
                 decode_regmem_reg(inst_name, &mut bytes, arg1, arg2);
                 continue 'decode;
             }
@@ -109,14 +128,14 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
                 continue 'decode;
             }
             0b1100011 => {
-                decode_mov_imm_regmem(&mut bytes, arg1, arg2);
+                decode_imm_regmem("mov", &mut bytes, arg1, arg2);
                 continue 'decode;
             }
             0b0000010 | 0b0000110 | 0b0001010 | 0b0001110 | 0b0010010 | 0b0010110 | 0b0011010
             | 0b0011110 => {
                 let inst_idx = (byte1 >> 3 & 0b0000111) as usize;
-                let inst_name = INSTRUCTION_NAMES[inst_idx];
-                decode_arithmetic_imm_acc(inst_name, &mut bytes);
+                let inst_name = ALU_INST_NAMES[inst_idx];
+                decode_alu_imm_acc(inst_name, &mut bytes);
                 continue 'decode;
             }
             0b1000011 => {
@@ -147,6 +166,15 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
                 decode_in_out(is_out, &mut bytes, arg1, arg2, is_fixed);
                 continue 'decode;
             }
+            0b1111011 => {
+                let reg_idx = (bytes[1] & REG_MASK >> REG_SHIFT) as usize;
+                if reg_idx >= 2 {
+                    decode_unary_regmem(GRP1[reg_idx], &mut bytes, arg1);
+                } else {
+                    decode_imm_regmem("test", &mut bytes, arg1, arg2);
+                }
+            }
+            0b1111111 => {}
             _ => (),
         }
 
@@ -181,6 +209,26 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
                 bytes = &bytes[1..];
                 continue 'decode;
             }
+            0b10011111 => {
+                println!("lahf");
+                bytes = &bytes[1..];
+                continue 'decode;
+            }
+            0b10011110 => {
+                println!("sahf");
+                bytes = &bytes[1..];
+                continue 'decode;
+            }
+            0b10011100 => {
+                println!("pushf");
+                bytes = &bytes[1..];
+                continue 'decode;
+            }
+            0b10011101 => {
+                println!("popf");
+                bytes = &bytes[1..];
+                continue 'decode;
+            }
             0b10001101 => {
                 decode_load_ptr("lea", &mut bytes, arg1);
                 continue 'decode;
@@ -193,6 +241,25 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
                 decode_load_ptr("les", &mut bytes, arg1);
                 continue 'decode;
             }
+            0b00110111 => {
+                println!("aaa");
+                bytes = &bytes[1..];
+                continue 'decode;
+            }
+            0b00100111 => {
+                println!("daa");
+                bytes = &bytes[1..];
+                continue 'decode;
+            }
+            0b00111111 => {
+                println!("aas");
+                bytes = &bytes[1..];
+                continue 'decode;
+            }
+            0b00101111 => {
+                println!("das");
+                continue 'decode;
+            }
             _ => panic!(
                 "Unsupported instruction. Opcode byte: {byte1:#b}, {:#b}",
                 bytes[0]
@@ -202,9 +269,9 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
 }
 
 enum EffectiveAddress {
-    Reg(&'static str),                          // mod=0b11
-    Direct(u16),                                // rm=0b110 mod=0
-    Indirect { base: &'static str, disp: i16 }, // disp could be zero
+    Reg(&'static str),           // mod=0b11
+    Direct(u16),                 // rm=0b110 mod=0
+    Indirect(&'static str, i16), // disp could be zero
 }
 
 // mod_bytes, rm, reg, displacement
@@ -214,8 +281,6 @@ fn decode_effective_address_calculation(
 ) -> (usize, EffectiveAddress) {
     const MOD_SHIFT: u8 = 6;
     const RM_MASK: u8 = 0b000000111;
-    const REG_SHIFT: u8 = 3;
-    const REG_MASK: u8 = 0b00111000;
 
     let byte = bytes[0];
     *bytes = &bytes[1..];
@@ -252,26 +317,30 @@ fn decode_effective_address_calculation(
                 displacement = i16::from_le_bytes([bytes[0], bytes[1]]);
                 *bytes = &bytes[2..];
             }
-            (
-                reg,
-                EffectiveAddress::Indirect {
-                    base: rm_reg_str,
-                    disp: displacement,
-                },
-            )
+            (reg, EffectiveAddress::Indirect(rm_reg_str, displacement))
         }
     }
 }
 
-fn write_effective_address(buffer: &mut String, eff_add: EffectiveAddress) {
-    match eff_add {
+fn write_effective_address_size(buffer: &mut String, eff_add: &EffectiveAddress, w_bit: usize) {
+    if w_bit == 1 && !matches!(*eff_add, EffectiveAddress::Reg(_)) {
+        if w_bit == 1 {
+            buffer.push_str("word ");
+        } else {
+            buffer.push_str("byte ");
+        }
+    }
+}
+
+fn write_effective_address(buffer: &mut String, eff_add: &EffectiveAddress) {
+    match *eff_add {
         EffectiveAddress::Reg(rm_reg_str) => {
             buffer.push_str(rm_reg_str);
         }
         EffectiveAddress::Direct(address) => {
             write!(buffer, "[{address}]").unwrap();
         }
-        EffectiveAddress::Indirect { base, disp } => {
+        EffectiveAddress::Indirect(base, disp) => {
             if disp > 0 {
                 write!(buffer, "[{} + {}]", base, disp).unwrap();
             } else if disp < 0 {
@@ -283,20 +352,14 @@ fn write_effective_address(buffer: &mut String, eff_add: EffectiveAddress) {
     }
 }
 
-fn decode_mov_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut String) {
+fn decode_imm_regmem(inst_name: &str, bytes: &mut &[u8], dst: &mut String, src: &mut String) {
     let byte1 = bytes[0];
     *bytes = &bytes[1..];
     let w_bit = (byte1 & W_BIT_MASK) as usize;
 
     let (_, eff_add) = decode_effective_address_calculation(bytes, w_bit);
-    if !matches!(eff_add, EffectiveAddress::Reg(_)) {
-        if w_bit == 1 {
-            dst.push_str("word ");
-        } else {
-            dst.push_str("byte ");
-        }
-    }
-    write_effective_address(dst, eff_add);
+    write_effective_address_size(dst, &eff_add, w_bit);
+    write_effective_address(dst, &eff_add);
 
     if w_bit == 1 {
         let immediate = i16::from_le_bytes([bytes[0], bytes[1]]);
@@ -308,7 +371,7 @@ fn decode_mov_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut String) 
         write!(src, "{immediate}").unwrap();
     }
 
-    println!("mov {dst}, {src}");
+    println!("{inst_name} {dst}, {src}");
 }
 
 fn decode_regmem_reg(instruction: &str, bytes: &mut &[u8], arg1: &mut String, arg2: &mut String) {
@@ -328,7 +391,7 @@ fn decode_regmem_reg(instruction: &str, bytes: &mut &[u8], arg1: &mut String, ar
 
     let (reg, eff_add) = decode_effective_address_calculation(bytes, w_bit);
     dst.push_str(REGISTER_MAP[reg][w_bit]);
-    write_effective_address(src, eff_add);
+    write_effective_address(src, &eff_add);
 
     println!("{instruction} {arg1}, {arg2}");
 }
@@ -368,7 +431,7 @@ fn decode_mov_mem_acc(bytes: &mut &[u8], acc_first: bool) {
     }
 }
 
-fn decode_arithmetic_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut String) {
+fn decode_alu_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut String) {
     let byte1 = bytes[0];
     *bytes = &bytes[1..];
 
@@ -377,15 +440,9 @@ fn decode_arithmetic_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut S
 
     let (inst_idx, eff_add) = decode_effective_address_calculation(bytes, w_bit);
 
-    let inst_name = INSTRUCTION_NAMES[inst_idx];
-    if !matches!(eff_add, EffectiveAddress::Reg(_)) {
-        if w_bit == 1 {
-            dst.push_str("word ");
-        } else {
-            dst.push_str("byte ");
-        }
-    }
-    write_effective_address(dst, eff_add);
+    let inst_name = ALU_INST_NAMES[inst_idx];
+    write_effective_address_size(dst, &eff_add, w_bit);
+    write_effective_address(dst, &eff_add);
 
     if w_bit == 0 {
         let immediate = bytes[0] as i8;
@@ -404,7 +461,7 @@ fn decode_arithmetic_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut S
     println!("{inst_name} {dst}, {src}");
 }
 
-fn decode_arithmetic_imm_acc(inst_name: &str, bytes: &mut &[u8]) {
+fn decode_alu_imm_acc(inst_name: &str, bytes: &mut &[u8]) {
     let byte1 = bytes[0];
     *bytes = &bytes[1..];
 
@@ -444,12 +501,12 @@ fn decode_push_pop_mem(inst_name: &str, bytes: &mut &[u8], dst: &mut String) {
 
     dst.push_str("word ");
     let (_, eff_add) = decode_effective_address_calculation(bytes, 1);
-    write_effective_address(dst, eff_add);
+    write_effective_address(dst, &eff_add);
 
     println!("{inst_name} {dst}");
 }
 
-fn decode_push_pop_reg(inst_name: &str, bytes: &mut &[u8]) {
+fn decode_one_byte_reg(inst_name: &str, bytes: &mut &[u8]) {
     let byte1 = bytes[0];
     *bytes = &bytes[1..];
 
@@ -505,12 +562,24 @@ fn decode_in_out(
     println!("{inst_name} {arg1}, {arg2}");
 }
 
-fn decode_load_ptr(inst_name: &str, bytes: &mut &[u8], arg1: &mut String) {
+fn decode_load_ptr(inst_name: &str, bytes: &mut &[u8], dst: &mut String) {
     *bytes = &bytes[1..];
 
     let (reg, eff_add) = decode_effective_address_calculation(bytes, 1);
     let reg_str = REGISTER_MAP[reg][1];
-    write_effective_address(arg1, eff_add);
+    write_effective_address(dst, &eff_add);
 
-    println!("{inst_name} {reg_str}, {arg1}");
+    println!("{inst_name} {reg_str}, {dst}");
+}
+
+fn decode_unary_regmem(inst_name: &str, bytes: &mut &[u8], dst: &mut String) {
+    let w_bit = (bytes[0] & W_BIT_MASK) as usize;
+    *bytes = &bytes[1..];
+
+    let (_, eff_add) = decode_effective_address_calculation(bytes, w_bit);
+
+    write_effective_address_size(dst, &eff_add, w_bit);
+    write_effective_address(dst, &eff_add);
+
+    println!("{inst_name} {dst}");
 }
