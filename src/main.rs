@@ -27,13 +27,6 @@ const SEGMENT_REGS: [&str; 4] = ["es", "cs", "ss", "ds"];
 const GRP1: [&str; 8] = ["test", "???", "not", "neg", "mul", "imul", "div", "idiv"];
 const GRP2: [&str; 8] = ["inc", "dec", "call", "call", "jmp", "jmp", "push", "???"];
 
-/* TODO:
-* [x] Handle grp1
-* [] Handle inc and dec push
-* [] Handle not
-* [] Handle pop which is now left alone
-*/
-
 fn main() {
     let args: Vec<String> = env::args().collect();
     let file_path = if args.len() != 2 {
@@ -135,11 +128,19 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
             | 0b0011110 => {
                 let inst_idx = (byte1 >> 3 & 0b0000111) as usize;
                 let inst_name = ALU_INST_NAMES[inst_idx];
-                decode_alu_imm_acc(inst_name, &mut bytes);
+                decode_imm_acc(inst_name, &mut bytes);
                 continue 'decode;
             }
             0b1000011 => {
                 decode_regmem_reg("xchg", &mut bytes, arg1, arg2);
+                continue 'decode;
+            }
+            0b1000010 => {
+                decode_regmem_reg("test", &mut bytes, arg1, arg2);
+                continue 'decode;
+            }
+            0b1010100 => {
+                decode_imm_acc("test", &mut bytes);
                 continue 'decode;
             }
             0b1110010 => {
@@ -260,6 +261,11 @@ fn decode_instructions(mut bytes: &[u8], arg1: &mut String, arg2: &mut String) {
             0b00101111 => {
                 println!("das");
                 bytes = &bytes[1..];
+                continue 'decode;
+            }
+            0b11010100 => {
+                println!("aam");
+                bytes = &bytes[2..];
                 continue 'decode;
             }
             _ => panic!(
@@ -465,7 +471,7 @@ fn decode_alu_imm_regmem(bytes: &mut &[u8], dst: &mut String, src: &mut String) 
     println!("{inst_name} {dst}, {src}");
 }
 
-fn decode_alu_imm_acc(inst_name: &str, bytes: &mut &[u8]) {
+fn decode_imm_acc(inst_name: &str, bytes: &mut &[u8]) {
     let byte1 = bytes[0];
     *bytes = &bytes[1..];
 
